@@ -1,0 +1,13 @@
+#!/bin/sh
+
+for vm in `vmrun list | tail -n +2`
+do
+    vmrun snapshot $vm backup
+done
+
+sudo zfs-dump -1rz tank | ssh platinum "cat > tank.1.gz"
+
+for vm in `vmrun list | tail -n +2`
+do
+    vmrun deleteSnapshot $vm backup
+done
