@@ -1,0 +1,107 @@
+#!/bin/sh
+
+usage() {
+    echo "Usage: $0 [-#] [-ndjzr] [-L label] [-f file] filesystem [filesystem...]
+    -#          Specify the dump level 0-9. Default: 0 (full backup)
+    -n          Print actions without actually doing anything
+    -d          Print debugging messages
+    -j          Compress with bzip2.
+    -z          Compress with gzip.
+    -r          Recurse through all child filesystems.
+    -L          Label to use for snapshots. Default: backup
+    -f          Filename to save backup to. Default: STDOUT
+    filesystem  Specify the filesystem(s) to dump. Examples: zpool1, tank/home
+    " 1>&2
+    exit 1
+}
+
+do_run() {
+    command="$@"
+    [ -n "$opt_dryrun" -o -n "$opt_debug" ] && echo "$command" 1>&2
+    [ -z "$opt_dryrun" ] && eval $command
+}
+
+snapshot_exists() {
+    level=$1  # level to look for
+    echo $SNAPS | grep -q "@$opt_label.$level"
+    return $?
+}
+
+zfs_send() {
+    fs=$1   # Filesystem to send
+    src=$2  # Source snapshot if incremental
+    dst=$3  # Dest snapshot to send
+
+    src=${src:+-i $opt_label.$src}
+    dst_fs="$fs@$opt_label.$dst"
+    compress=${opt_compress:+| $opt_compress}
+    file=${opt_file:+> $opt_file}
+
+    snapshot_exists $dst && do_run zfs destroy ${opt_recursive:+-r} $dst_fs
+    do_run zfs snapshot ${opt_recursive:+-r} $dst_fs
+    do_run zfs send -p ${opt_recursive:+-R} $src $dst_fs $compress $file
+}
+
+opt_level=0
+opt_dryrun=''
+opt_debug=''
+opt_compress=''
+opt_recursive=''
+opt_label='backup'
+opt_file=''
+
+while getopts "0123456789ndjzrL:f:" o
+do
+    case "$o" in
+        [0-9])
+            opt_level=$o
+            ;;
+        n)
+            opt_dryrun="yes"
+            ;;
+        d)
+            opt_debug="yes"
+            ;;
+        j)
+            opt_compress="bzip2"
+            ;;
+        z)
+            opt_compress="gzip"
+            ;;
+        r)
+            opt_recursive="yes"
+            ;;
+        L)
+            opt_label=${OPTARG}
+            ;;
+        f)
+            opt_file=${OPTARG}
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
+for fs
+do
+    # Get list of applicable snapshots
+    SNAPS=$(zfs list -t snapshot -d 1 -o name $fs | grep "@$opt_label.")
+    # Revert to level 0 if no level 0 snapshot exists
+    snapshot_exists 0 || opt_level=0 
+    if [ "$opt_level" -eq 0 ]
+    then
+        zfs_send $fs '' $opt_level
+    else
+        # Check for highest level snapshot under $opt_level
+        for i in `seq $((opt_level-1)) -1 0`
+        do
+            if snapshot_exists $i
+            then
+                zfs_send $fs $i $opt_level
+                break
+            fi
+        done
+    fi
+done
