@@ -1,13 +1,23 @@
-#!/bin/sh
+#!/bin/bash
+set -o pipefail
+DEST=/cifs/lonnie.olson/backups
 
-for vm in `vmrun list | tail -n +2`
+level=0
+[ "$#" -gt 0 ] && level=$1
+
+BACKUP="tank/backup tank/home tank/vmware/Windows10"
+
+for fs in $BACKUP
 do
-    vmrun snapshot $vm backup
+    for i in `seq 9 -1 $level`
+    do
+        d=$DEST/${fs//\//_}.$i.gz
+        [ -f $d ] && mv $d $d.bak
+    done
+
+    zfs-dump -$level $fs | gzip > $d
+    [ $? -ne 0 ] && exit 1
 done
 
-sudo zfs-dump -1rz tank | ssh platinum "cat > tank.1.gz"
+find $DEST -name \*.bak -delete
 
-for vm in `vmrun list | tail -n +2`
-do
-    vmrun deleteSnapshot $vm backup
-done

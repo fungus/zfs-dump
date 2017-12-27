@@ -37,7 +37,10 @@ zfs_send() {
     compress=${opt_compress:+| $opt_compress}
     file=${opt_file:+> $opt_file}
 
-    snapshot_exists $dst && do_run zfs destroy ${opt_recursive:+-r} $dst_fs
+    for i in `seq $dst 9`
+    do
+        snapshot_exists $i && do_run zfs destroy ${opt_recursive:+-r} $fs@$opt_label.$i
+    done
     do_run zfs snapshot ${opt_recursive:+-r} $dst_fs
     do_run zfs send -p ${opt_recursive:+-R} $src $dst_fs $compress $file
 }
