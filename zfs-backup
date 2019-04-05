@@ -1,7 +1,7 @@
 #!/bin/bash
 set -o pipefail
 DEST=/backup/dump
-BACKUP="backup/tank/backup backup/tank/home backup/tank/vmware/Windows10"
+BACKUP="tank/backup ssd/home ssd/vmware/Windows10"
 
 # Lock to prevent simultaneous runs
 TMP=/var/lock/zfs-backup.lock

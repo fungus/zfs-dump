@@ -23,8 +23,12 @@ do_run() {
 
 snapshot_exists() {
     level=$1  # level to look for
-    echo $SNAPS | grep -q "@$opt_label.$level"
+    echo "$SNAPS" | grep -q "@$opt_label.*level$level"
     return $?
+}
+snapshot_name() {
+    level=$1
+    echo "$SNAPS" | awk -F@ "/@$opt_label.*level$level/{print \$2}"
 }
 
 zfs_send() {
@@ -32,14 +36,15 @@ zfs_send() {
     src=$2  # Source snapshot if incremental
     dst=$3  # Dest snapshot to send
 
-    src=${src:+-i $opt_label.$src}
-    dst_fs="$fs@$opt_label.$dst"
+    DATE=$(date +%Y-%m-%d_%H:%M:%S)
+    src=${src:+-i $(snapshot_name $src)}
+    dst_fs="$fs@${opt_label}_${DATE}_level${dst}"
     compress=${opt_compress:+| $opt_compress}
     file=${opt_file:+> $opt_file}
 
     for i in `seq $dst 9`
     do
-        snapshot_exists $i && do_run zfs destroy ${opt_recursive:+-r} $fs@$opt_label.$i
+        snapshot_exists $i && do_run zfs destroy ${opt_recursive:+-r} $fs@$(snapshot_name $i)
     done
     do_run zfs snapshot ${opt_recursive:+-r} $dst_fs
     do_run zfs send -p ${opt_recursive:+-R} $src $dst_fs $compress $file
@@ -90,21 +95,16 @@ shift $((OPTIND-1))
 for fs
 do
     # Get list of applicable snapshots
-    SNAPS=$(zfs list -t snapshot -d 1 -o name $fs | grep "@$opt_label.")
-    # Revert to level 0 if no level 0 snapshot exists
-    snapshot_exists 0 || opt_level=0 
-    if [ "$opt_level" -eq 0 ]
-    then
-        zfs_send $fs '' $opt_level
-    else
-        # Check for highest level snapshot under $opt_level
-        for i in `seq $((opt_level-1)) -1 0`
-        do
-            if snapshot_exists $i
-            then
-                zfs_send $fs $i $opt_level
-                break
-            fi
-        done
-    fi
+    SNAPS=$(zfs list -t snapshot -d 1 -o name $fs | grep "@$opt_label.*level[0-9]")
+    # Check for highest level snapshot under $opt_level
+    src=''
+    for i in `seq $((opt_level-1)) -1 0`
+    do
+        if snapshot_exists $i
+        then
+            src=$i
+            break
+        fi
+    done
+    zfs_send $fs "$src" $opt_level
 done
