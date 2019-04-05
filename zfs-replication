@@ -1,0 +1,14 @@
+#!/bin/bash
+SYNC="/usr/local/bin/syncoid --quiet"
+
+# Backup root partition
+rsync -aqx --delete / /tank/backup/fungus/
+
+# Replicate ssd -> tank
+$SYNC ssd/home tank/home
+$SYNC -r ssd/vmware tank/vmware
+
+# Replicate tank -> backup
+$SYNC tank/duplicity backup/tank/duplicity
+$SYNC --no-sync-snap -r tank backup/tank
+

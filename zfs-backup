@@ -1,23 +1,38 @@
 #!/bin/bash
 set -o pipefail
-DEST=/cifs/lonnie.olson/backups
+DEST=/backup/dump
+BACKUP="backup/tank/backup backup/tank/home backup/tank/vmware/Windows10"
 
-level=0
-[ "$#" -gt 0 ] && level=$1
+# Lock to prevent simultaneous runs
+TMP=/var/lock/zfs-backup.lock
+exec 99>>$TMP
+flock -n 99 || exit 1
+trap "rm -f $TMP" EXIT
 
-BACKUP="tank/backup tank/home tank/vmware/Windows10"
+# Determine backup level by schedule
+get_level () {
+    fsname=$1
+    touch -d '-1 month' $TMP
+    [ $fsname.0.gz_00 -ot $TMP ] && return 0
+    touch -d '-1 week' $TMP
+    [ $fsname.1.gz_00 -ot $TMP ] && return 1
+    touch -d '-1 day' $TMP
+    [ $fsname.2.gz_00 -ot $TMP ] && return 2
+    return 3
+}
 
+cd $DEST
 for fs in $BACKUP
 do
-    for i in `seq 9 -1 $level`
-    do
-        d=$DEST/${fs//\//_}.$i.gz
-        [ -f $d ] && mv $d $d.bak
-    done
-
-    zfs-dump -$level $fs | gzip > $d
+    fsname=${fs//\//_}
+    get_level $fsname
+    level=$?
+    rm -f $fsname.[$level-9].gz_*
+    zfs-dump -$level $fs | pigz | split -d -b 5G - $fsname.$level.gz_
     [ $? -ne 0 ] && exit 1
 done
 
-find $DEST -name \*.bak -delete
-
+# Sync to cloud outside business hours
+hour=$(date +%H)
+[ $hour -ge 7 -a $hour -le 18 ] && exit
+rclone sync $DEST onedrive:backups
