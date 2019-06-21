@@ -1,12 +1,15 @@
 #!/bin/bash
 SYNC="/usr/local/bin/syncoid --quiet"
+delete_snaps() {
+  zfs list -r -t snapshot -Ho name "$1" | grep "$2" | xargs -rn 1 zfs destroy
+}
+# Replicate rpool -> tank
+$SYNC rpool/ROOT/ubuntu tank/ubuntu
+$SYNC rpool/home tank/home
+$SYNC -r rpool/vmware tank/vmware
 
-# Backup root partition
-rsync -aqx --delete / /tank/backup/fungus/
-
-# Replicate ssd -> tank
-$SYNC ssd/home tank/home
-$SYNC -r ssd/vmware tank/vmware
+# Cleanup unneeded snapshots
+delete_snaps tank @backup_
 
 # Replicate tank -> backup
 $SYNC tank/duplicity backup/tank/duplicity
