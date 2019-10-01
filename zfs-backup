@@ -3,7 +3,6 @@ set -o pipefail
 DEST=/backup/dump
 BACKUP="rpool/ROOT/ubuntu rpool/home rpool/vmware/Windows10"
 GPG="gpg -e -r lonnie"
-SPLIT="split -d -b 5G -"
 
 # Lock to prevent simultaneous runs
 TMP=/var/lock/zfs-backup.lock
@@ -15,22 +14,22 @@ trap "rm -f $TMP" EXIT
 get_level () {
     fsname=$1
     touch -d '-1 month' $TMP
-    [ $fsname.0.gz_00 -ot $TMP ] && return 0
+    [ $fsname.0.gz.gpg -ot $TMP ] && return 0
     touch -d '-1 week' $TMP
-    [ $fsname.1.gz_00 -ot $TMP ] && return 1
+    [ $fsname.1.gz.gpg -ot $TMP ] && return 1
     touch -d '-23 hours' $TMP
-    [ $fsname.2.gz_00 -ot $TMP ] && return 2
+    [ $fsname.2.gz.gpg -ot $TMP ] && return 2
     return 3
 }
 
-cd $DEST
+cd $DEST || exit 1
 for fs in $BACKUP
 do
     fsname=${fs//\//_}
     get_level $fsname
     level=$?
-    rm -f $fsname.[$level-9].gz_*
-    zfs-dump -$level $fs | pigz | $GPG | $SPLIT $fsname.$level.gz_
+    rm -f $fsname.[$level-9].gz.gpg
+    zfs-dump -$level $fs | pigz | $GPG > $fsname.$level.gz.gpg
     [ $? -ne 0 ] && exit 1
 done
 
