@@ -5,10 +5,10 @@ BACKUP="rpool/ROOT/ubuntu rpool/home rpool/vmware/Windows10"
 GPG="gpg -e -r lonnie"
 
 # Lock to prevent simultaneous runs
-TMP=/var/lock/zfs-backup.lock
-exec 99>>$TMP
+LOCK=/var/lock/zfs-backup.lock
+exec 99>>$LOCK
 flock -n 99 || exit 1
-trap "rm -f $TMP" EXIT
+trap "rm -f $LOCK" EXIT
 
 # Determine backup level by schedule
 get_level () {
@@ -28,12 +28,14 @@ do
     fsname=${fs//\//_}
     get_level $fsname
     level=$?
-    rm -f $fsname.[$level-9].gz.gpg
-    zfs-dump -$level $fs | pigz | $GPG > $fsname.$level.gz.gpg
+    TMP=$(mktemp -p .)
+    zfs-dump -$level $fs | pigz | $GPG > $TMP
     if [ $? -ne 0 ]; then
-        rm $fsname.$level.gz.gpg
+        rm $TMP
         exit 1
     fi
+    rm -f $fsname.[$level-9].gz.gpg
+    mv $TMP $fsname.$level.gz.gpg
 done
 
 # Sync to cloud outside business hours
