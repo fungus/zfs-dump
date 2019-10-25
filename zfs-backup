@@ -30,7 +30,10 @@ do
     level=$?
     rm -f $fsname.[$level-9].gz.gpg
     zfs-dump -$level $fs | pigz | $GPG > $fsname.$level.gz.gpg
-    [ $? -ne 0 ] && exit 1
+    if [ $? -ne 0 ]; then
+        rm $fsname.$level.gz.gpg
+        exit 1
+    fi
 done
 
 # Sync to cloud outside business hours
