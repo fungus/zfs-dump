@@ -1,8 +1,9 @@
 #!/bin/bash
 set -o pipefail
-DEST=/backup/dump
-BACKUP="rpool/ROOT/ubuntu rpool/home rpool/vmware/Windows10"
-GPG="gpg -e -r lonnie"
+BACKUP_DEV=/dev/mapper/luks-47f41fd4-44cd-47b3-89fc-350bcf9bd30c
+BACKUP_DEST=/backup/dump
+FS="rpool/ROOT/ubuntu_x9vssh rpool/USERDATA/fungus_9veq21 rpool/USERDATA/fungus_9veq21/vmware/Windows10"
+FS_R=rpool/ROOT/ubuntu_x9vssh
 
 # Lock to prevent simultaneous runs
 LOCK=/var/lock/zfs-backup.lock
@@ -10,36 +11,54 @@ exec 99>>$LOCK
 flock -n 99 || exit 1
 trap "rm -f $LOCK" EXIT
 
+# Import backup pool
+if [ ! -b $BACKUP_DEV ]
+then
+    echo "Backup device not found: $BACKUP_DEV" 1>&2
+    exit 1
+fi
+zpool list backup >& /dev/null || zpool import -o cachefile=none backup || exit 1
+
+# Replicate rpool -> backup
+/usr/local/bin/syncoid -r --no-sync-snap --quiet rpool backup/rpool
+
 # Determine backup level by schedule
 get_level () {
     fsname=$1
-    touch -d '-1 month' $TMP
-    [ $fsname.0.gz.gpg -ot $TMP ] && return 0
-    touch -d '-1 week' $TMP
-    [ $fsname.1.gz.gpg -ot $TMP ] && return 1
-    touch -d '-23 hours' $TMP
-    [ $fsname.2.gz.gpg -ot $TMP ] && return 2
+    touch -d '-1 month' $LOCK
+    [ $fsname.0.gz.gpg -ot $LOCK ] && return 0
+    touch -d '-1 week' $LOCK
+    [ $fsname.1.gz.gpg -ot $LOCK ] && return 1
+    touch -d '-23 hours' $LOCK
+    [ $fsname.2.gz.gpg -ot $LOCK ] && return 2
     return 3
 }
 
-cd $DEST || exit 1
-for fs in $BACKUP
+# Backup filesystem to files
+cd $BACKUP_DEST || exit 1
+for fs in $FS
 do
     fsname=${fs//\//_}
     get_level $fsname
     level=$?
     TMP=$(mktemp -p .)
-    zfs-dump -$level $fs | pigz | $GPG > $TMP
+    [ $fs = $FS_R ] && r='-r' || r=''
+    zfs-dump -$level $r $fs > $TMP
     if [ $? -ne 0 ]; then
         rm $TMP
         exit 1
     fi
-    rm -f $fsname.[$level-9].gz.gpg
-    mv $TMP $fsname.$level.gz.gpg
+    rm -f $fsname.[$level-9]
+    mv $TMP $fsname.$level
 done
+cd
 
-# Sync to cloud outside business hours
-hour=$(date +%H)
-[ $hour -ge 7 -a $hour -le 18 ] && bwlimit="--bwlimit 2000"
-rclone $bwlimit sync $DEST drive:backup/fungus
+# Sanpshot backup
+zfs snapshot backup/dump@backup_$(date +%Y-%m-%d_%H:%M:%S)
+
+# Sync to cloud
+rclone sync $BACKUP_DEST drive:backup/fungus
+
+# Export backup pool
+zpool export backup
 
